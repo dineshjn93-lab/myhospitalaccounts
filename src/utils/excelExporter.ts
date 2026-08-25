@@ -490,7 +490,87 @@ export async function exportHospitalWorkbookToExcel(data: ExportData) {
     row.eachCell((cell) => (cell.border = thinBorder));
   });
 
-  // 13. VOUCHER PRINT
+  // 13. PAN DEDUCTION REPORT (Template 1)
+  const wsPanDed = workbook.addWorksheet('PAN Deduction Report');
+  applyA4PrintSetup(wsPanDed, 'landscape');
+  wsPanDed.columns = [
+    { header: 'SL NO', key: 'slNo', width: 10 },
+    { header: 'FIRM NAME/ OFFICER/STAFF NAME', key: 'name', width: 35 },
+    { header: 'PAN NO.', key: 'panNo', width: 18 },
+    { header: 'GROSS AMOUNT', key: 'grossAmount', width: 20 },
+    { header: 'INVOICE NO', key: 'invoiceNo', width: 18 },
+    { header: 'INVOICE DATE', key: 'invoiceDate', width: 16 },
+    { header: 'TAXABLE AMOUNT', key: 'taxableAmount', width: 20 },
+    { header: 'NET AMOUNT', key: 'netAmount', width: 20 },
+  ];
+  formatHeaderRow(wsPanDed.getRow(1));
+
+  let panSl = 1;
+  data.bills.forEach((b, idx) => {
+    const sup = data.suppliers.find((s) => s.name === b.supplierName || s.id === b.supplierId);
+    const pan = sup?.panNo || (b.gstNo ? b.gstNo.substring(2, 12) : 'AABCB9876D');
+    const gross = b.totalAmount || (b.billAmount + b.gstAmount);
+    const taxable = b.billAmount || 0;
+    const tds = Math.round((taxable * 2) / 100);
+    const net = gross - tds;
+    const rowNum = idx + 2;
+
+    const row = wsPanDed.addRow({
+      slNo: panSl++,
+      name: b.supplierName,
+      panNo: pan,
+      grossAmount: gross,
+      invoiceNo: b.billNo,
+      invoiceDate: b.billDate,
+      taxableAmount: taxable,
+      netAmount: { formula: `D${rowNum}-(G${rowNum}*0.02)` },
+    });
+    row.getCell('D').numFmt = '₹#,##0.00';
+    row.getCell('G').numFmt = '₹#,##0.00';
+    row.getCell('H').numFmt = '₹#,##0.00';
+    row.eachCell((cell) => (cell.border = thinBorder));
+  });
+
+  // 14. GST DEDUCTION REPORT (Template 2)
+  const wsGstDed = workbook.addWorksheet('GST Deduction Report');
+  applyA4PrintSetup(wsGstDed, 'landscape');
+  wsGstDed.columns = [
+    { header: 'SL NO', key: 'slNo', width: 10 },
+    { header: 'FIRM NAME', key: 'firmName', width: 35 },
+    { header: 'GST NO.', key: 'gstNo', width: 22 },
+    { header: 'GROSS AMOUNT', key: 'grossAmount', width: 20 },
+    { header: 'INVOICE NO', key: 'invoiceNo', width: 18 },
+    { header: 'INVOICE DATE', key: 'invoiceDate', width: 16 },
+    { header: 'TAXABLE AMOUNT', key: 'taxableAmount', width: 20 },
+    { header: 'NET AMOUNT', key: 'netAmount', width: 20 },
+  ];
+  formatHeaderRow(wsGstDed.getRow(1));
+
+  let gstSl = 1;
+  data.bills.forEach((b, idx) => {
+    const sup = data.suppliers.find((s) => s.name === b.supplierName || s.id === b.supplierId);
+    const gst = sup?.gstNo || b.gstNo || '07AABCB9876D1Z2';
+    const gross = b.totalAmount || (b.billAmount + b.gstAmount);
+    const taxable = b.billAmount || 0;
+    const rowNum = idx + 2;
+
+    const row = wsGstDed.addRow({
+      slNo: gstSl++,
+      firmName: b.supplierName,
+      gstNo: gst,
+      grossAmount: gross,
+      invoiceNo: b.billNo,
+      invoiceDate: b.billDate,
+      taxableAmount: taxable,
+      netAmount: { formula: `D${rowNum}-(G${rowNum}*0.02)` },
+    });
+    row.getCell('D').numFmt = '₹#,##0.00';
+    row.getCell('G').numFmt = '₹#,##0.00';
+    row.getCell('H').numFmt = '₹#,##0.00';
+    row.eachCell((cell) => (cell.border = thinBorder));
+  });
+
+  // 15. VOUCHER PRINT
   const wsVoucher = workbook.addWorksheet('Voucher Print');
   applyA4PrintSetup(wsVoucher, 'portrait');
   wsVoucher.columns = [

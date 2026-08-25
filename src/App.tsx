@@ -4,10 +4,11 @@ import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { SheetTable, ColumnDef } from './components/SheetTable';
 import { VoucherPrintView } from './components/VoucherPrintView';
+import { DeductionReportsView } from './components/DeductionReportsView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { FormulasGuideModal } from './components/FormulasGuideModal';
-import { SupabaseModal } from './components/SupabaseModal';
+import { GoogleSheetsModal } from './components/GoogleSheetsModal';
 
 import {
   SheetTab,
@@ -39,67 +40,141 @@ import {
 
 import { exportHospitalWorkbookToExcel } from './utils/excelExporter';
 import {
-  loadAllHospitalData,
-  saveHospitalSettings,
-  insertSupplier,
-  deleteSupplier,
-  insertRecipient,
-  deleteRecipient,
-  insertBankMaster,
-  deleteBankMaster,
-  insertCashBook,
-  deleteCashBook,
-  insertPettyCash,
-  deletePettyCash,
-  insertBill,
-  deleteBill,
-  insertPayment,
-  deletePayment,
-  insertGSTEntry,
-  deleteGSTEntry,
-  insertExpenditure,
-  deleteExpenditure,
-} from './services/supabaseService';
+  getStoredAccessToken,
+  getStoredSpreadsheetInfo,
+  pushAllDataToSpreadsheet,
+  pullAllDataFromSpreadsheet,
+} from './services/googleSheetsService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SheetTab>('dashboard');
   const [isFormulasGuideOpen, setIsFormulasGuideOpen] = useState(false);
-  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const [isGoogleSheetsModalOpen, setIsGoogleSheetsModalOpen] = useState(false);
 
   // Core Data States
-  const [settings, setSettings] = useState<HospitalSettings>(initialHospitalSettings);
-  const [suppliers, setSuppliers] = useState<Supplier[]>(initialSuppliers);
-  const [recipients, setRecipients] = useState<Recipient[]>(initialRecipients);
-  const [banks, setBanks] = useState<BankMasterItem[]>(initialBankMaster);
-  const [cashBook, setCashBook] = useState<CashBookEntry[]>(initialCashBook);
-  const [pettyCash, setPettyCash] = useState<PettyCashEntry[]>(initialPettyCash);
-  const [bills, setBills] = useState<BillEntry[]>(initialBillRegister);
-  const [payments, setPayments] = useState<PaymentEntry[]>(initialPaymentRegister);
-  const [gstEntries, setGstEntries] = useState<GSTEntry[]>(initialGSTRegister);
-  const [expenditures, setExpenditures] = useState<ExpenditureEntry[]>(initialExpenditureRegister);
+  const [settings, setSettings] = useState<HospitalSettings>(() => {
+    const saved = localStorage.getItem('ghams_local_settings');
+    return saved ? JSON.parse(saved) : initialHospitalSettings;
+  });
+  const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
+    const saved = localStorage.getItem('ghams_local_suppliers');
+    return saved ? JSON.parse(saved) : initialSuppliers;
+  });
+  const [recipients, setRecipients] = useState<Recipient[]>(() => {
+    const saved = localStorage.getItem('ghams_local_recipients');
+    return saved ? JSON.parse(saved) : initialRecipients;
+  });
+  const [banks, setBanks] = useState<BankMasterItem[]>(() => {
+    const saved = localStorage.getItem('ghams_local_banks');
+    return saved ? JSON.parse(saved) : initialBankMaster;
+  });
+  const [cashBook, setCashBook] = useState<CashBookEntry[]>(() => {
+    const saved = localStorage.getItem('ghams_local_cash');
+    return saved ? JSON.parse(saved) : initialCashBook;
+  });
+  const [pettyCash, setPettyCash] = useState<PettyCashEntry[]>(() => {
+    const saved = localStorage.getItem('ghams_local_petty');
+    return saved ? JSON.parse(saved) : initialPettyCash;
+  });
+  const [bills, setBills] = useState<BillEntry[]>(() => {
+    const saved = localStorage.getItem('ghams_local_bills');
+    return saved ? JSON.parse(saved) : initialBillRegister;
+  });
+  const [payments, setPayments] = useState<PaymentEntry[]>(() => {
+    const saved = localStorage.getItem('ghams_local_payments');
+    return saved ? JSON.parse(saved) : initialPaymentRegister;
+  });
+  const [gstEntries, setGstEntries] = useState<GSTEntry[]>(() => {
+    const saved = localStorage.getItem('ghams_local_gst');
+    return saved ? JSON.parse(saved) : initialGSTRegister;
+  });
+  const [expenditures, setExpenditures] = useState<ExpenditureEntry[]>(() => {
+    const saved = localStorage.getItem('ghams_local_exp');
+    return saved ? JSON.parse(saved) : initialExpenditureRegister;
+  });
 
-  // Fetch initial data from Supabase on mount
-  const refreshFromSupabase = async () => {
+  // Persist locally
+  useEffect(() => {
+    localStorage.setItem('ghams_local_settings', JSON.stringify(settings));
+  }, [settings]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_suppliers', JSON.stringify(suppliers));
+  }, [suppliers]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_recipients', JSON.stringify(recipients));
+  }, [recipients]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_banks', JSON.stringify(banks));
+  }, [banks]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_cash', JSON.stringify(cashBook));
+  }, [cashBook]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_petty', JSON.stringify(pettyCash));
+  }, [pettyCash]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_bills', JSON.stringify(bills));
+  }, [bills]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_payments', JSON.stringify(payments));
+  }, [payments]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_gst', JSON.stringify(gstEntries));
+  }, [gstEntries]);
+  useEffect(() => {
+    localStorage.setItem('ghams_local_exp', JSON.stringify(expenditures));
+  }, [expenditures]);
+
+  // Background auto-sync helper with Google Sheets
+  const triggerGoogleSheetsBackgroundSync = async (updatedOverrides: any = {}) => {
+    const token = getStoredAccessToken();
+    const { spreadsheetId } = getStoredSpreadsheetInfo();
+    if (!token || !spreadsheetId) return;
+
     try {
-      const data = await loadAllHospitalData();
-      if (data.settings) setSettings(data.settings);
-      if (data.suppliers?.length) setSuppliers(data.suppliers);
-      if (data.recipients?.length) setRecipients(data.recipients);
-      if (data.banks?.length) setBanks(data.banks);
-      if (data.cashBook?.length) setCashBook(data.cashBook);
-      if (data.pettyCash?.length) setPettyCash(data.pettyCash);
-      if (data.bills?.length) setBills(data.bills);
-      if (data.payments?.length) setPayments(data.payments);
-      if (data.gstEntries?.length) setGstEntries(data.gstEntries);
-      if (data.expenditures?.length) setExpenditures(data.expenditures);
+      await pushAllDataToSpreadsheet(token, spreadsheetId, {
+        settings: updatedOverrides.settings || settings,
+        suppliers: updatedOverrides.suppliers || suppliers,
+        recipients: updatedOverrides.recipients || recipients,
+        banks: updatedOverrides.banks || banks,
+        cashBook: updatedOverrides.cashBook || cashBook,
+        pettyCash: updatedOverrides.pettyCash || pettyCash,
+        bills: updatedOverrides.bills || bills,
+        payments: updatedOverrides.payments || payments,
+        gstEntries: updatedOverrides.gstEntries || gstEntries,
+        expenditures: updatedOverrides.expenditures || expenditures,
+      });
     } catch (e) {
-      console.warn('Supabase data loading fallback to local state:', e);
+      console.warn('Background Google Sheets sync error:', e);
     }
   };
 
+  // Pull latest on mount if token and spreadsheet exist
   useEffect(() => {
-    refreshFromSupabase();
+    const token = getStoredAccessToken();
+    const { spreadsheetId } = getStoredSpreadsheetInfo();
+    if (token && spreadsheetId) {
+      pullAllDataFromSpreadsheet(token, spreadsheetId)
+        .then((pulled) => {
+          handleDataImportedFromSheets(pulled);
+        })
+        .catch((err) => {
+          console.warn('Initial Google Sheets fetch skipped:', err);
+        });
+    }
   }, []);
+
+  const handleDataImportedFromSheets = (pulled: any) => {
+    if (pulled.suppliers?.length) setSuppliers(pulled.suppliers);
+    if (pulled.recipients?.length) setRecipients(pulled.recipients);
+    if (pulled.banks?.length) setBanks(pulled.banks);
+    if (pulled.cashBook?.length) setCashBook(pulled.cashBook);
+    if (pulled.pettyCash?.length) setPettyCash(pulled.pettyCash);
+    if (pulled.bills?.length) setBills(pulled.bills);
+    if (pulled.payments?.length) setPayments(pulled.payments);
+    if (pulled.gstEntries?.length) setGstEntries(pulled.gstEntries);
+    if (pulled.expenditures?.length) setExpenditures(pulled.expenditures);
+  };
 
   // Reload / Reset handlers
   const handleLoadSampleData = () => {
@@ -113,6 +188,18 @@ export default function App() {
     setPayments(initialPaymentRegister);
     setGstEntries(initialGSTRegister);
     setExpenditures(initialExpenditureRegister);
+    triggerGoogleSheetsBackgroundSync({
+      settings: initialHospitalSettings,
+      suppliers: initialSuppliers,
+      recipients: initialRecipients,
+      banks: initialBankMaster,
+      cashBook: initialCashBook,
+      pettyCash: initialPettyCash,
+      bills: initialBillRegister,
+      payments: initialPaymentRegister,
+      gstEntries: initialGSTRegister,
+      expenditures: initialExpenditureRegister,
+    });
   };
 
   const handleResetData = () => {
@@ -141,46 +228,49 @@ export default function App() {
 
   const handleUpdateSettings = (newSettings: HospitalSettings) => {
     setSettings(newSettings);
-    saveHospitalSettings(newSettings);
+    triggerGoogleSheetsBackgroundSync({ settings: newSettings });
   };
 
-  // Add Supplier with Supabase
+  // Add Supplier with Google Sheets Sync
   const handleAddSupplier = (newSup: Supplier) => {
-    setSuppliers((prev) => [newSup, ...prev]);
-    insertSupplier(newSup);
+    const updated = [newSup, ...suppliers];
+    setSuppliers(updated);
+    triggerGoogleSheetsBackgroundSync({ suppliers: updated });
   };
 
   const handleDeleteSupplier = (idx: number) => {
-    const item = suppliers[idx];
-    setSuppliers((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.id) deleteSupplier(item.id);
+    const updated = suppliers.filter((_, i) => i !== idx);
+    setSuppliers(updated);
+    triggerGoogleSheetsBackgroundSync({ suppliers: updated });
   };
 
-  // Add Recipient with Supabase
+  // Add Recipient with Google Sheets Sync
   const handleAddRecipient = (newRec: Recipient) => {
-    setRecipients((prev) => [newRec, ...prev]);
-    insertRecipient(newRec);
+    const updated = [newRec, ...recipients];
+    setRecipients(updated);
+    triggerGoogleSheetsBackgroundSync({ recipients: updated });
   };
 
   const handleDeleteRecipient = (idx: number) => {
-    const item = recipients[idx];
-    setRecipients((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.id) deleteRecipient(item.id);
+    const updated = recipients.filter((_, i) => i !== idx);
+    setRecipients(updated);
+    triggerGoogleSheetsBackgroundSync({ recipients: updated });
   };
 
-  // Add Bank with Supabase
+  // Add Bank with Google Sheets Sync
   const handleAddBank = (newBnk: BankMasterItem) => {
-    setBanks((prev) => [newBnk, ...prev]);
-    insertBankMaster(newBnk);
+    const updated = [newBnk, ...banks];
+    setBanks(updated);
+    triggerGoogleSheetsBackgroundSync({ banks: updated });
   };
 
   const handleDeleteBank = (idx: number) => {
-    const item = banks[idx];
-    setBanks((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.id) deleteBankMaster(item.id);
+    const updated = banks.filter((_, i) => i !== idx);
+    setBanks(updated);
+    triggerGoogleSheetsBackgroundSync({ banks: updated });
   };
 
-  // Add Bill Helper (Auto syncs with GST, Expenditure, and Supabase)
+  // Add Bill Helper (Auto syncs with GST, Expenditure, and Google Sheets)
   const handleAddBill = (newBill: BillEntry) => {
     const computedTotal = (newBill.billAmount || 0) + (newBill.gstAmount || 0);
     const billToAdd: BillEntry = {
@@ -189,9 +279,10 @@ export default function App() {
       status: newBill.status || 'Pending',
     };
 
-    setBills((prev) => [billToAdd, ...prev]);
-    insertBill(billToAdd);
+    const updatedBills = [billToAdd, ...bills];
+    setBills(updatedBills);
 
+    let updatedGst = gstEntries;
     // Sync GST Entry
     if (newBill.gstAmount && newBill.gstAmount > 0) {
       const halfGst = newBill.gstAmount / 2;
@@ -205,8 +296,8 @@ export default function App() {
         igst: 0,
         totalGst: newBill.gstAmount,
       };
-      setGstEntries((prev) => [newGst, ...prev]);
-      insertGSTEntry(newGst);
+      updatedGst = [newGst, ...gstEntries];
+      setGstEntries(updatedGst);
     }
 
     // Sync Expenditure Entry
@@ -219,33 +310,44 @@ export default function App() {
       gst: newBill.gstAmount || 0,
       total: computedTotal,
     };
-    setExpenditures((prev) => [newExp, ...prev]);
-    insertExpenditure(newExp);
+    const updatedExp = [newExp, ...expenditures];
+    setExpenditures(updatedExp);
+
+    triggerGoogleSheetsBackgroundSync({
+      bills: updatedBills,
+      gstEntries: updatedGst,
+      expenditures: updatedExp,
+    });
   };
 
   const handleDeleteBill = (idx: number) => {
-    const item = bills[idx];
-    setBills((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.billNo) deleteBill(item.billNo);
+    const updated = bills.filter((_, i) => i !== idx);
+    setBills(updated);
+    triggerGoogleSheetsBackgroundSync({ bills: updated });
   };
 
-  // Add Payment Helper (Updates Bill Status to Paid + writes to Supabase)
+  // Add Payment Helper (Updates Bill Status to Paid + writes to Google Sheets)
   const handleAddPayment = (newPay: PaymentEntry) => {
-    setPayments((prev) => [newPay, ...prev]);
-    insertPayment(newPay);
+    const updatedPayments = [newPay, ...payments];
+    setPayments(updatedPayments);
 
     // Update Bill Status if bill match
+    let updatedBills = bills;
     if (newPay.billNo) {
-      setBills((prev) =>
-        prev.map((b) => (b.billNo === newPay.billNo ? { ...b, status: 'Paid' } : b))
-      );
+      updatedBills = bills.map((b) => (b.billNo === newPay.billNo ? { ...b, status: 'Paid' as const } : b));
+      setBills(updatedBills);
     }
+
+    triggerGoogleSheetsBackgroundSync({
+      payments: updatedPayments,
+      bills: updatedBills,
+    });
   };
 
   const handleDeletePayment = (idx: number) => {
-    const item = payments[idx];
-    setPayments((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.paymentNo) deletePayment(item.paymentNo);
+    const updated = payments.filter((_, i) => i !== idx);
+    setPayments(updated);
+    triggerGoogleSheetsBackgroundSync({ payments: updated });
   };
 
   // Add Cash Book Helper
@@ -257,14 +359,15 @@ export default function App() {
       ...entry,
       runningBalance: newBal,
     };
-    setCashBook((prev) => [...prev, fullEntry]);
-    insertCashBook(fullEntry);
+    const updated = [...cashBook, fullEntry];
+    setCashBook(updated);
+    triggerGoogleSheetsBackgroundSync({ cashBook: updated });
   };
 
   const handleDeleteCashBook = (idx: number) => {
-    const item = cashBook[idx];
-    setCashBook((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.voucherNo) deleteCashBook(item.voucherNo);
+    const updated = cashBook.filter((_, i) => i !== idx);
+    setCashBook(updated);
+    triggerGoogleSheetsBackgroundSync({ cashBook: updated });
   };
 
   // Add Petty Cash Helper
@@ -278,38 +381,41 @@ export default function App() {
       ...entry,
       runningBalance: newBal,
     };
-    setPettyCash((prev) => [...prev, fullEntry]);
-    insertPettyCash(fullEntry);
+    const updated = [...pettyCash, fullEntry];
+    setPettyCash(updated);
+    triggerGoogleSheetsBackgroundSync({ pettyCash: updated });
   };
 
   const handleDeletePettyCash = (idx: number) => {
-    const item = pettyCash[idx];
-    setPettyCash((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.voucherNo) deletePettyCash(item.voucherNo);
+    const updated = pettyCash.filter((_, i) => i !== idx);
+    setPettyCash(updated);
+    triggerGoogleSheetsBackgroundSync({ pettyCash: updated });
   };
 
   // Add GST Helper
-  const handleAddGST = (newGst: GSTEntry) => {
-    setGstEntries((prev) => [newGst, ...prev]);
-    insertGSTEntry(newGst);
+  const handleAddGST = (entry: GSTEntry) => {
+    const updated = [entry, ...gstEntries];
+    setGstEntries(updated);
+    triggerGoogleSheetsBackgroundSync({ gstEntries: updated });
   };
 
   const handleDeleteGST = (idx: number) => {
-    const item = gstEntries[idx];
-    setGstEntries((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.billNo) deleteGSTEntry(item.billNo);
+    const updated = gstEntries.filter((_, i) => i !== idx);
+    setGstEntries(updated);
+    triggerGoogleSheetsBackgroundSync({ gstEntries: updated });
   };
 
   // Add Expenditure Helper
-  const handleAddExpenditure = (newExp: ExpenditureEntry) => {
-    setExpenditures((prev) => [newExp, ...prev]);
-    insertExpenditure(newExp);
+  const handleAddExpenditure = (entry: ExpenditureEntry) => {
+    const updated = [entry, ...expenditures];
+    setExpenditures(updated);
+    triggerGoogleSheetsBackgroundSync({ expenditures: updated });
   };
 
   const handleDeleteExpenditure = (idx: number) => {
-    const item = expenditures[idx];
-    setExpenditures((prev) => prev.filter((_, i) => i !== idx));
-    if (item?.billNo) deleteExpenditure(item.billNo);
+    const updated = expenditures.filter((_, i) => i !== idx);
+    setExpenditures(updated);
+    triggerGoogleSheetsBackgroundSync({ expenditures: updated });
   };
 
   // Category Options
@@ -510,8 +616,8 @@ export default function App() {
       <Navbar
         settings={settings}
         onExportExcel={handleExportExcel}
-        onOpenFormulasGuide={() => setIsFormulasGuideOpen(false) || setIsFormulasGuideOpen(true)}
-        onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+        onOpenFormulasGuide={() => setIsFormulasGuideOpen(true)}
+        onOpenGoogleSheetsModal={() => setIsGoogleSheetsModalOpen(true)}
         onResetData={handleResetData}
         onLoadSampleData={handleLoadSampleData}
         onPrint={() => window.print()}
@@ -770,6 +876,16 @@ export default function App() {
             </div>
           )}
 
+          {activeTab === 'deduction_reports' && (
+            <DeductionReportsView
+              settings={settings}
+              bills={bills}
+              suppliers={suppliers}
+              recipients={recipients}
+              payments={payments}
+            />
+          )}
+
           {activeTab === 'voucher_print' && (
             <VoucherPrintView settings={settings} payments={payments} />
           )}
@@ -793,11 +909,23 @@ export default function App() {
         </main>
       </div>
 
-      {/* Supabase Database & SQL Setup Modal */}
-      <SupabaseModal
-        isOpen={isSupabaseModalOpen}
-        onClose={() => setIsSupabaseModalOpen(false)}
-        onDataSynced={refreshFromSupabase}
+      {/* Google Sheets Live Sync Modal */}
+      <GoogleSheetsModal
+        isOpen={isGoogleSheetsModalOpen}
+        onClose={() => setIsGoogleSheetsModalOpen(false)}
+        hospitalData={{
+          settings,
+          suppliers,
+          recipients,
+          banks,
+          cashBook,
+          pettyCash,
+          bills,
+          payments,
+          gstEntries,
+          expenditures,
+        }}
+        onDataImported={handleDataImportedFromSheets}
       />
 
       {/* Formula Architecture Inspector Modal */}

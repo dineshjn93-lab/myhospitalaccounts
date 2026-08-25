@@ -46,6 +46,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     { id: 8, name: '8. Annual Expenditure Statement', code: 'REP-AES-08' },
     { id: 9, name: '9. Bill Pending Report', code: 'REP-BP-09' },
     { id: 10, name: '10. Payment Register Report', code: 'REP-PR-10' },
+    { id: 11, name: '11. PAN Based Deduction Report (TDS)', code: 'REP-TDS-11' },
+    { id: 12, name: '12. GST Based Deduction Report (GST TDS)', code: 'REP-GST-12' },
   ];
 
   const categoriesList: ExpenditureCategory[] = [
@@ -441,6 +443,90 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     <td className="p-2 text-right font-mono font-bold">₹{p.amountPaid.toLocaleString('en-IN')}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeReport === 11 && (
+          /* 11. PAN Based Deduction Report (Template 1) */
+          <div className="space-y-4">
+            <table className="w-full text-xs border-collapse border border-slate-900">
+              <thead className="bg-slate-100 font-bold border-b border-slate-900 uppercase">
+                <tr>
+                  <th className="p-2 text-center border-r border-slate-900 w-12">SL NO</th>
+                  <th className="p-2 text-left border-r border-slate-900">FIRM NAME/ OFFICER/STAFF NAME</th>
+                  <th className="p-2 text-center border-r border-slate-900 font-mono">PAN NO.</th>
+                  <th className="p-2 text-right border-r border-slate-900">GROSS AMOUNT (₹)</th>
+                  <th className="p-2 text-center border-r border-slate-900 font-mono">INVOICE NO</th>
+                  <th className="p-2 text-center border-r border-slate-900 font-mono">INVOICE DATE</th>
+                  <th className="p-2 text-right border-r border-slate-900">TAXABLE AMOUNT (₹)</th>
+                  <th className="p-2 text-right">NET AMOUNT (₹)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-300">
+                {bills.map((b, idx) => {
+                  const sup = suppliers.find((s) => s.name === b.supplierName || s.id === b.supplierId);
+                  const pan = sup?.panNo || (b.gstNo ? b.gstNo.substring(2, 12) : 'AABCB9876D');
+                  const gross = b.totalAmount || (b.billAmount + b.gstAmount);
+                  const taxable = b.billAmount || 0;
+                  const tds = Math.round((taxable * 2) / 100);
+                  const net = gross - tds;
+                  return (
+                    <tr key={b.billNo}>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono">{idx + 1}</td>
+                      <td className="p-2 border-r border-slate-900 font-semibold">{b.supplierName}</td>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono font-bold">{pan}</td>
+                      <td className="p-2 text-right border-r border-slate-900 font-mono">₹{gross.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono">{b.billNo}</td>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono">{b.billDate}</td>
+                      <td className="p-2 text-right border-r border-slate-900 font-mono">₹{taxable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-2 text-right font-mono font-bold text-slate-900">₹{net.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeReport === 12 && (
+          /* 12. GST Based Deduction Report (Template 2) */
+          <div className="space-y-4">
+            <table className="w-full text-xs border-collapse border border-slate-900">
+              <thead className="bg-slate-100 font-bold border-b border-slate-900 uppercase">
+                <tr>
+                  <th className="p-2 text-center border-r border-slate-900 w-12">SL NO</th>
+                  <th className="p-2 text-left border-r border-slate-900">FIRM NAME</th>
+                  <th className="p-2 text-center border-r border-slate-900 font-mono">GST NO.</th>
+                  <th className="p-2 text-right border-r border-slate-900">GROSS AMOUNT (₹)</th>
+                  <th className="p-2 text-center border-r border-slate-900 font-mono">INVOICE NO</th>
+                  <th className="p-2 text-center border-r border-slate-900 font-mono">INVOICE DATE</th>
+                  <th className="p-2 text-right border-r border-slate-900">TAXABLE AMOUNT (₹)</th>
+                  <th className="p-2 text-right">NET AMOUNT (₹)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-300">
+                {bills.map((b, idx) => {
+                  const sup = suppliers.find((s) => s.name === b.supplierName || s.id === b.supplierId);
+                  const gst = sup?.gstNo || b.gstNo || '07AABCB9876D1Z2';
+                  const gross = b.totalAmount || (b.billAmount + b.gstAmount);
+                  const taxable = b.billAmount || 0;
+                  const gstTds = Math.round((taxable * 2) / 100);
+                  const net = gross - gstTds;
+                  return (
+                    <tr key={b.billNo}>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono">{idx + 1}</td>
+                      <td className="p-2 border-r border-slate-900 font-semibold">{b.supplierName}</td>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono font-bold">{gst}</td>
+                      <td className="p-2 text-right border-r border-slate-900 font-mono">₹{gross.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono">{b.billNo}</td>
+                      <td className="p-2 text-center border-r border-slate-900 font-mono">{b.billDate}</td>
+                      <td className="p-2 text-right border-r border-slate-900 font-mono">₹{taxable.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                      <td className="p-2 text-right font-mono font-bold text-slate-900">₹{net.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

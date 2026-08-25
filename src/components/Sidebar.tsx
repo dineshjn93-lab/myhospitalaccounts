@@ -14,6 +14,7 @@ import {
   BarChart3,
   Printer,
   FileText,
+  Calculator,
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { SheetTab } from '../types/hospital';
@@ -73,19 +74,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab, counts
       items: [
         { id: 'monthly_summary' as SheetTab, name: '11. Monthly Summary', icon: CalendarDays, badge: null },
         { id: 'annual_summary' as SheetTab, name: '12. Annual Summary', icon: BarChart3, badge: null },
+        {
+          id: 'deduction_reports' as SheetTab,
+          name: '13. Deduction Reports',
+          icon: Calculator,
+          badge: 'TDS & GST',
+          badgeColor: 'bg-emerald-800/80 text-emerald-200 border-emerald-600 font-bold',
+        },
       ],
     },
     {
       label: 'Printables & Reports',
       items: [
-        { id: 'voucher_print' as SheetTab, name: '13. Voucher Print', icon: Printer, badge: 'A4' },
-        { id: 'reports' as SheetTab, name: '14. Reports (10 Types)', icon: FileText, badge: 'Print' },
+        { id: 'voucher_print' as SheetTab, name: '14. Voucher Print', icon: Printer, badge: 'A4' },
+        { id: 'reports' as SheetTab, name: '15. Reports (10 Types)', icon: FileText, badge: 'Print' },
       ],
     },
     {
       label: 'System Setup',
       items: [
-        { id: 'settings' as SheetTab, name: '15. Settings & Rules', icon: SettingsIcon, badge: null },
+        { id: 'settings' as SheetTab, name: '16. Settings & Rules', icon: SettingsIcon, badge: null },
       ],
     },
   ];

@@ -158,6 +158,34 @@ export interface AnnualSummaryItem {
   pendingBillsAmount: number;
 }
 
+export interface PanDeductionRow {
+  slNo: number;
+  name: string; // FIRM NAME/ OFFICER/STAFF NAME
+  panNo: string; // PAN NO.
+  grossAmount: number; // GROSS AMOUNT
+  invoiceNo: string; // INVOICE NO
+  invoiceDate: string; // INVOICE DATE
+  taxableAmount: number; // TAXABLE AMOUNT
+  netAmount: number; // NET AMOUNT
+  tdsRate?: number; // e.g. 2% or 10%
+  tdsAmount?: number;
+  section?: string; // e.g. 194C / 194J / 192
+  type?: 'Firm / Vendor' | 'Officer / Staff';
+}
+
+export interface GstDeductionRow {
+  slNo: number;
+  firmName: string; // FIRM NAME
+  gstNo: string; // GST NO.
+  grossAmount: number; // GROSS AMOUNT
+  invoiceNo: string; // INVOICE NO
+  invoiceDate: string; // INVOICE DATE
+  taxableAmount: number; // TAXABLE AMOUNT
+  netAmount: number; // NET AMOUNT
+  gstTdsRate?: number; // e.g. 2% (1% CGST + 1% SGST)
+  gstTdsAmount?: number;
+}
+
 export type SheetTab =
   | 'dashboard'
   | 'supplier_master'
@@ -169,8 +197,10 @@ export type SheetTab =
   | 'payment_register'
   | 'gst_register'
   | 'expenditure_register'
+  | 'deduction_reports'
   | 'monthly_summary'
   | 'annual_summary'
   | 'voucher_print'
   | 'reports'
   | 'settings';
+
