@@ -186,6 +186,28 @@ export interface GstDeductionRow {
   gstTdsAmount?: number;
 }
 
+export type UserRole =
+  | 'Medical Superintendent'
+  | 'Senior Accountant / DDO'
+  | 'Internal Auditor'
+  | 'Accountant / Cashier'
+  | 'Hospital Administrator';
+
+export interface AppUser {
+  id: string;
+  fullName: string;
+  email: string;
+  username: string;
+  password?: string;
+  role: UserRole;
+  phone?: string;
+  avatarUrl?: string;
+  authProvider?: 'local' | 'google';
+  hospitalSettings: HospitalSettings;
+  createdAt: string;
+  lastLoginAt: string;
+}
+
 export type SheetTab =
   | 'dashboard'
   | 'supplier_master'
@@ -203,4 +225,5 @@ export type SheetTab =
   | 'voucher_print'
   | 'reports'
   | 'settings';
+
 

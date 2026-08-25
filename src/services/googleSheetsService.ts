@@ -19,15 +19,61 @@ declare global {
 }
 
 // OAuth Client ID
-export const OAUTH_CLIENT_ID = "225897638637-ob5hh88v9a6b3bp6l4bg4j89uka2rvim.apps.googleusercontent.com";
-export const SHEETS_SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
+export const OAUTH_CLIENT_ID =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOOGLE_CLIENT_ID) ||
+  "1073410467538-96vk7nra9dkuumii5je8nqp7qchb8vf6.apps.googleusercontent.com";
+export const SHEETS_SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
 
 const STORAGE_KEY_TOKEN = "ghams_google_access_token";
 const STORAGE_KEY_EXPIRES = "ghams_google_token_expires";
 const STORAGE_KEY_SPREADSHEET_ID = "ghams_google_spreadsheet_id";
 const STORAGE_KEY_SPREADSHEET_URL = "ghams_google_spreadsheet_url";
+const STORAGE_KEY_AUTO_SYNC = "ghams_google_auto_sync_enabled";
+const STORAGE_KEY_AUTO_SYNC_INTERVAL = "ghams_google_auto_sync_interval";
+const STORAGE_KEY_AUTO_PULL_ON_LOAD = "ghams_google_auto_pull_on_load";
+const STORAGE_KEY_LAST_SYNC_TIME = "ghams_google_last_sync_time";
+
+export interface AutoSyncConfig {
+  enabled: boolean;
+  interval: 'realtime' | '1m' | '5m' | '15m' | '30m';
+  autoPullOnLoad: boolean;
+  lastSyncTime: string | null;
+}
 
 let tokenClient: any = null;
+
+// Retrieve auto-sync configuration
+export function getAutoSyncConfig(): AutoSyncConfig {
+  const enabledStored = localStorage.getItem(STORAGE_KEY_AUTO_SYNC);
+  const intervalStored = localStorage.getItem(STORAGE_KEY_AUTO_SYNC_INTERVAL);
+  const pullStored = localStorage.getItem(STORAGE_KEY_AUTO_PULL_ON_LOAD);
+  const lastTime = localStorage.getItem(STORAGE_KEY_LAST_SYNC_TIME);
+
+  return {
+    enabled: enabledStored !== null ? enabledStored === 'true' : true,
+    interval: (intervalStored as any) || 'realtime',
+    autoPullOnLoad: pullStored !== null ? pullStored === 'true' : true,
+    lastSyncTime: lastTime || null,
+  };
+}
+
+export function saveAutoSyncConfig(config: Partial<AutoSyncConfig>): AutoSyncConfig {
+  const current = getAutoSyncConfig();
+  const updated: AutoSyncConfig = { ...current, ...config };
+
+  localStorage.setItem(STORAGE_KEY_AUTO_SYNC, String(updated.enabled));
+  localStorage.setItem(STORAGE_KEY_AUTO_SYNC_INTERVAL, updated.interval);
+  localStorage.setItem(STORAGE_KEY_AUTO_PULL_ON_LOAD, String(updated.autoPullOnLoad));
+  if (updated.lastSyncTime) {
+    localStorage.setItem(STORAGE_KEY_LAST_SYNC_TIME, updated.lastSyncTime);
+  }
+
+  return updated;
+}
+
+export function recordLastSyncTime(timestamp: string = new Date().toISOString()): void {
+  localStorage.setItem(STORAGE_KEY_LAST_SYNC_TIME, timestamp);
+}
 
 // Retrieve existing valid token from storage
 export function getStoredAccessToken(): string | null {
@@ -85,6 +131,24 @@ export function requestGoogleAccessToken(): Promise<string> {
 
     tokenClient.requestAccessToken({ prompt: "consent" });
   });
+}
+
+// Fetch Google User Profile using Access Token
+export async function fetchGoogleUserProfile(token: string): Promise<{
+  email: string;
+  name: string;
+  picture?: string;
+  id?: string;
+}> {
+  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch Google profile information.');
+  }
+  return res.json();
 }
 
 // Standard Sheets API Helper
@@ -391,6 +455,8 @@ export async function pushAllDataToSpreadsheet(
       }),
     }
   );
+
+  recordLastSyncTime();
 }
 
 // 3. Append a single row to a specific Sheet in Google Sheets
@@ -556,6 +622,8 @@ export async function pullAllDataFromSpreadsheet(token: string, spreadsheetId: s
     gst: Number(String(row[5]).replace(/[^0-9.-]+/g, '')) || 0,
     total: Number(String(row[6]).replace(/[^0-9.-]+/g, '')) || 0,
   }));
+
+  recordLastSyncTime();
 
   return {
     suppliers: parsedSuppliers.length ? parsedSuppliers : null,

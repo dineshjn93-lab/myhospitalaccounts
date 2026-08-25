@@ -9,6 +9,7 @@ import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { FormulasGuideModal } from './components/FormulasGuideModal';
 import { GoogleSheetsModal } from './components/GoogleSheetsModal';
+import { CloudIntegrationModal } from './components/CloudIntegrationModal';
 
 import {
   SheetTab,
@@ -23,6 +24,7 @@ import {
   GSTEntry,
   ExpenditureEntry,
   ExpenditureCategory,
+  AppUser,
 } from './types/hospital';
 
 import {
@@ -44,18 +46,47 @@ import {
   getStoredSpreadsheetInfo,
   pushAllDataToSpreadsheet,
   pullAllDataFromSpreadsheet,
+  AutoSyncConfig,
+  getAutoSyncConfig,
+  saveAutoSyncConfig,
 } from './services/googleSheetsService';
+import { AuthService } from './services/authService';
+import { AuthModal } from './components/AuthModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<SheetTab>('dashboard');
   const [isFormulasGuideOpen, setIsFormulasGuideOpen] = useState(false);
   const [isGoogleSheetsModalOpen, setIsGoogleSheetsModalOpen] = useState(false);
+  const [isCloudModalOpen, setIsCloudModalOpen] = useState(false);
+  const [cloudModalTab, setCloudModalTab] = useState<'supabase' | 'github' | 'netlify' | 'google'>('supabase');
+
+  const handleOpenCloudModal = (tab: 'supabase' | 'github' | 'netlify' | 'google' = 'supabase') => {
+    setCloudModalTab(tab);
+    setIsCloudModalOpen(true);
+  };
+
+  // Auto-Sync States
+  const [autoSyncConfig, setAutoSyncConfig] = useState<AutoSyncConfig>(() => getAutoSyncConfig());
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error' | 'disabled'>('idle');
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => getAutoSyncConfig().lastSyncTime);
+
+  // User Authentication State
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    return AuthService.getCurrentUser();
+  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'signup'>('login');
 
   // Core Data States
   const [settings, setSettings] = useState<HospitalSettings>(() => {
+    const activeUser = AuthService.getCurrentUser();
+    if (activeUser?.hospitalSettings) {
+      return activeUser.hospitalSettings;
+    }
     const saved = localStorage.getItem('ghams_local_settings');
     return saved ? JSON.parse(saved) : initialHospitalSettings;
   });
+
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => {
     const saved = localStorage.getItem('ghams_local_suppliers');
     return saved ? JSON.parse(saved) : initialSuppliers;
@@ -125,11 +156,202 @@ export default function App() {
     localStorage.setItem('ghams_local_exp', JSON.stringify(expenditures));
   }, [expenditures]);
 
-  // Background auto-sync helper with Google Sheets
-  const triggerGoogleSheetsBackgroundSync = async (updatedOverrides: any = {}) => {
+  // Update auto-sync config
+  const handleUpdateAutoSyncConfig = (updated: Partial<AutoSyncConfig>) => {
+    const saved = saveAutoSyncConfig(updated);
+    setAutoSyncConfig(saved);
+    if (!saved.enabled) {
+      setSyncStatus('disabled');
+    } else {
+      setSyncStatus('idle');
+    }
+  };
+
+  // Manual on-demand sync
+  const handleManualSync = async () => {
+    const token = getStoredAccessToken();
+    const { spreadsheetId } = getStoredSpreadsheetInfo();
+    if (!token || !spreadsheetId) {
+      throw new Error('Google account or linked spreadsheet not configured.');
+    }
+    setSyncStatus('syncing');
+    try {
+      await pushAllDataToSpreadsheet(token, spreadsheetId, {
+        settings,
+        suppliers,
+        recipients,
+        banks,
+        cashBook,
+        pettyCash,
+        bills,
+        payments,
+        gstEntries,
+        expenditures,
+      });
+      const now = new Date().toISOString();
+      setLastSyncTime(now);
+      setSyncStatus('synced');
+      setTimeout(() => setSyncStatus('idle'), 3000);
+    } catch (err) {
+      setSyncStatus('error');
+      throw err;
+    }
+  };
+
+  // Real-time Debounced Auto-Sync Effect
+  const isInitialMount = React.useRef(true);
+  const debounceTimerRef = React.useRef<any>(null);
+
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (!autoSyncConfig.enabled || autoSyncConfig.interval !== 'realtime') {
+      return;
+    }
+
     const token = getStoredAccessToken();
     const { spreadsheetId } = getStoredSpreadsheetInfo();
     if (!token || !spreadsheetId) return;
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(async () => {
+      setSyncStatus('syncing');
+      try {
+        await pushAllDataToSpreadsheet(token, spreadsheetId, {
+          settings,
+          suppliers,
+          recipients,
+          banks,
+          cashBook,
+          pettyCash,
+          bills,
+          payments,
+          gstEntries,
+          expenditures,
+        });
+        const now = new Date().toISOString();
+        setLastSyncTime(now);
+        setSyncStatus('synced');
+        setTimeout(() => setSyncStatus('idle'), 3000);
+      } catch (err) {
+        console.warn('Auto-sync error:', err);
+        setSyncStatus('error');
+      }
+    }, 1800);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [
+    settings,
+    suppliers,
+    recipients,
+    banks,
+    cashBook,
+    pettyCash,
+    bills,
+    payments,
+    gstEntries,
+    expenditures,
+    autoSyncConfig.enabled,
+    autoSyncConfig.interval,
+  ]);
+
+  // Periodic Interval Auto-Sync Effect
+  useEffect(() => {
+    if (!autoSyncConfig.enabled || autoSyncConfig.interval === 'realtime') {
+      return;
+    }
+
+    const intervalMap: Record<string, number> = {
+      '1m': 60 * 1000,
+      '5m': 5 * 60 * 1000,
+      '15m': 15 * 60 * 1000,
+      '30m': 30 * 60 * 1000,
+    };
+
+    const intervalMs = intervalMap[autoSyncConfig.interval] || 5 * 60 * 1000;
+
+    const timer = setInterval(async () => {
+      const token = getStoredAccessToken();
+      const { spreadsheetId } = getStoredSpreadsheetInfo();
+      if (!token || !spreadsheetId) return;
+
+      setSyncStatus('syncing');
+      try {
+        await pushAllDataToSpreadsheet(token, spreadsheetId, {
+          settings,
+          suppliers,
+          recipients,
+          banks,
+          cashBook,
+          pettyCash,
+          bills,
+          payments,
+          gstEntries,
+          expenditures,
+        });
+        const now = new Date().toISOString();
+        setLastSyncTime(now);
+        setSyncStatus('synced');
+        setTimeout(() => setSyncStatus('idle'), 3000);
+      } catch (err) {
+        console.warn('Periodic auto-sync error:', err);
+        setSyncStatus('error');
+      }
+    }, intervalMs);
+
+    return () => clearInterval(timer);
+  }, [
+    autoSyncConfig.enabled,
+    autoSyncConfig.interval,
+    settings,
+    suppliers,
+    recipients,
+    banks,
+    cashBook,
+    pettyCash,
+    bills,
+    payments,
+    gstEntries,
+    expenditures,
+  ]);
+
+  // Pull latest on mount if autoPullOnLoad is enabled and token & spreadsheet exist
+  useEffect(() => {
+    if (!autoSyncConfig.autoPullOnLoad) return;
+    const token = getStoredAccessToken();
+    const { spreadsheetId } = getStoredSpreadsheetInfo();
+    if (token && spreadsheetId) {
+      setSyncStatus('syncing');
+      pullAllDataFromSpreadsheet(token, spreadsheetId)
+        .then((pulled) => {
+          handleDataImportedFromSheets(pulled);
+          const now = new Date().toISOString();
+          setLastSyncTime(now);
+          setSyncStatus('synced');
+          setTimeout(() => setSyncStatus('idle'), 3000);
+        })
+        .catch((err) => {
+          console.warn('Initial Google Sheets fetch skipped:', err);
+          setSyncStatus('idle');
+        });
+    }
+  }, []);
+
+  // Background auto-sync helper for specific direct calls
+  const triggerGoogleSheetsBackgroundSync = async (updatedOverrides: any = {}) => {
+    const token = getStoredAccessToken();
+    const { spreadsheetId } = getStoredSpreadsheetInfo();
+    if (!token || !spreadsheetId || !autoSyncConfig.enabled) return;
 
     try {
       await pushAllDataToSpreadsheet(token, spreadsheetId, {
@@ -144,25 +366,12 @@ export default function App() {
         gstEntries: updatedOverrides.gstEntries || gstEntries,
         expenditures: updatedOverrides.expenditures || expenditures,
       });
+      const now = new Date().toISOString();
+      setLastSyncTime(now);
     } catch (e) {
       console.warn('Background Google Sheets sync error:', e);
     }
   };
-
-  // Pull latest on mount if token and spreadsheet exist
-  useEffect(() => {
-    const token = getStoredAccessToken();
-    const { spreadsheetId } = getStoredSpreadsheetInfo();
-    if (token && spreadsheetId) {
-      pullAllDataFromSpreadsheet(token, spreadsheetId)
-        .then((pulled) => {
-          handleDataImportedFromSheets(pulled);
-        })
-        .catch((err) => {
-          console.warn('Initial Google Sheets fetch skipped:', err);
-        });
-    }
-  }, []);
 
   const handleDataImportedFromSheets = (pulled: any) => {
     if (pulled.suppliers?.length) setSuppliers(pulled.suppliers);
@@ -174,6 +383,35 @@ export default function App() {
     if (pulled.payments?.length) setPayments(pulled.payments);
     if (pulled.gstEntries?.length) setGstEntries(pulled.gstEntries);
     if (pulled.expenditures?.length) setExpenditures(pulled.expenditures);
+  };
+
+  const handleOpenAuth = (mode: 'login' | 'signup') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const handleAuthSuccess = (user: AppUser) => {
+    setCurrentUser(user);
+    if (user.hospitalSettings) {
+      setSettings(user.hospitalSettings);
+      triggerGoogleSheetsBackgroundSync({ settings: user.hospitalSettings });
+    }
+  };
+
+  const handleLogout = () => {
+    AuthService.logout();
+    setCurrentUser(null);
+    setAuthModalMode('login');
+    setIsAuthModalOpen(true);
+  };
+
+  const handleSwitchUser = (user: AppUser) => {
+    AuthService.setCurrentUser(user);
+    setCurrentUser(user);
+    if (user.hospitalSettings) {
+      setSettings(user.hospitalSettings);
+      triggerGoogleSheetsBackgroundSync({ settings: user.hospitalSettings });
+    }
   };
 
   // Reload / Reset handlers
@@ -228,8 +466,13 @@ export default function App() {
 
   const handleUpdateSettings = (newSettings: HospitalSettings) => {
     setSettings(newSettings);
+    if (currentUser) {
+      const updatedUser = AuthService.updateUserHospitalSettings(currentUser.id, newSettings);
+      if (updatedUser) setCurrentUser(updatedUser);
+    }
     triggerGoogleSheetsBackgroundSync({ settings: newSettings });
   };
+
 
   // Add Supplier with Google Sheets Sync
   const handleAddSupplier = (newSup: Supplier) => {
@@ -615,13 +858,24 @@ export default function App() {
       {/* Top Header Navbar */}
       <Navbar
         settings={settings}
+        currentUser={currentUser}
+        autoSyncEnabled={autoSyncConfig.enabled}
+        syncStatus={syncStatus}
+        lastSyncTime={lastSyncTime}
+        hasLinkedSheet={!!getStoredSpreadsheetInfo().spreadsheetId}
         onExportExcel={handleExportExcel}
         onOpenFormulasGuide={() => setIsFormulasGuideOpen(true)}
         onOpenGoogleSheetsModal={() => setIsGoogleSheetsModalOpen(true)}
+        onOpenCloudIntegrationModal={handleOpenCloudModal}
         onResetData={handleResetData}
         onLoadSampleData={handleLoadSampleData}
         onPrint={() => window.print()}
+        onOpenAuth={handleOpenAuth}
+        onLogout={handleLogout}
+        onSwitchUser={handleSwitchUser}
+        onOpenSettingsTab={() => setActiveTab('settings')}
       />
+
 
       {/* Main Body */}
       <div className="flex-1 flex overflow-hidden">
@@ -904,10 +1158,26 @@ export default function App() {
           )}
 
           {activeTab === 'settings' && (
-            <SettingsView settings={settings} onUpdateSettings={handleUpdateSettings} />
+            <SettingsView
+              settings={settings}
+              onUpdateSettings={handleUpdateSettings}
+              autoSyncConfig={autoSyncConfig}
+              onUpdateAutoSyncConfig={handleUpdateAutoSyncConfig}
+              syncStatus={syncStatus}
+              lastSyncTime={lastSyncTime}
+              onOpenGoogleSheetsModal={() => setIsGoogleSheetsModalOpen(true)}
+              onOpenCloudIntegrationModal={handleOpenCloudModal}
+            />
           )}
         </main>
       </div>
+
+      {/* Cloud Integration & Infrastructure Modal (Supabase, GitHub, Netlify, Google OAuth) */}
+      <CloudIntegrationModal
+        isOpen={isCloudModalOpen}
+        initialTab={cloudModalTab}
+        onClose={() => setIsCloudModalOpen(false)}
+      />
 
       {/* Google Sheets Live Sync Modal */}
       <GoogleSheetsModal
@@ -925,13 +1195,26 @@ export default function App() {
           gstEntries,
           expenditures,
         }}
+        autoSyncConfig={autoSyncConfig}
+        onUpdateAutoSyncConfig={handleUpdateAutoSyncConfig}
+        syncStatus={syncStatus}
+        lastSyncTime={lastSyncTime}
         onDataImported={handleDataImportedFromSheets}
+        onManualSync={handleManualSync}
       />
 
       {/* Formula Architecture Inspector Modal */}
       <FormulasGuideModal
         isOpen={isFormulasGuideOpen}
         onClose={() => setIsFormulasGuideOpen(false)}
+      />
+
+      {/* User Authentication & Hospital Master Registration Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        initialMode={authModalMode}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
       />
     </div>
   );
