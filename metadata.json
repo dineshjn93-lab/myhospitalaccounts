@@ -1,0 +1,6 @@
+{
+  "name": "Government Hospital Accounts Management System",
+  "description": "Excel and Google Sheets compatible Government Hospital Accounts Management System with 15 structured sheets, auto-formulas, printable A4 reports, vouchers, registers, and XLSX export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
